@@ -67,12 +67,12 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.5-fix</small>
+    <small>Per-location data is saved to your browser. v3.6-stable</small>
   </footer>
 
   <script>
-  // ---- v3.5-fix ----
-  document.getElementById('ver')?.append('v3.5');
+  // ---- v3.6-stable ----
+  document.getElementById('ver')?.append('v3.6');
 
   // Show any JS errors on page
   const errEl = document.getElementById('err');
@@ -166,7 +166,7 @@
   }
 
   function recalcAllMutating(instance){
-    if(!instance) return;
+    if(!instance || typeof instance.countRows !== 'function') return;
     const rows = instance.getSourceData();
     for (let r=0; r<rows.length; r++){
       const c = calcRow(rows[r]);
@@ -229,25 +229,30 @@
   let currentMeta = loadMeta(currentLocation);
 
   function applyRowHighlights(instance){
-    const target = getTargetPct();
-    const rows = instance.countRows();
-    const cols = instance.countCols();
-    for(let r=0; r<rows; r++){
-      const rowData = instance.getSourceDataAtRow(r);
-      const pct = Number(rowData?.pour_cost_pct);
-      for(let c=0; c<cols; c++){
-        const td = instance.getCell(r,c); if(!td) continue;
-        td.classList.remove('htInvalidCost','htGoodCost');
-        if (!isNaN(pct) && pct>0) td.classList.add(pct>target?'htInvalidCost':'htGoodCost');
+    try{
+      if (!instance || typeof instance.countRows !== 'function') return;
+      const rows = instance.countRows();
+      const cols = instance.countCols();
+      const target = getTargetPct();
+      for(let r=0; r<rows; r++){
+        const rowData = instance.getSourceDataAtRow(r);
+        const pct = Number(rowData?.pour_cost_pct);
+        for(let c=0; c<cols; c++){
+          const td = instance.getCell(r,c);
+          if(!td) continue;
+          td.classList.remove('htInvalidCost','htGoodCost');
+          if (!isNaN(pct) && pct>0) td.classList.add(pct>target?'htInvalidCost':'htGoodCost');
+        }
       }
+    } catch(e){
+      // swallow highlight errors; never block UI
+      console.warn('highlight skipped', e);
     }
   }
 
   function initGrid(loc){
     try{
-      if (typeof window.Handsontable === 'undefined') {
-        throw new Error('Handsontable not available on window.');
-      }
+      if (typeof window.Handsontable === 'undefined') throw new Error('Handsontable not available on window.');
 
       currentMeta = loadMeta(loc);
       const {columns, colHeaders} = buildColumnsAndHeaders(currentMeta);
@@ -270,25 +275,23 @@
         manualColumnResize: true,
         manualRowResize: true,
         afterChange(changes, source){
-          try {
+          try{
             if(!changes || source==='calc' || source==='loadData') return;
             for (const [ri, prop, , nv] of changes){
               if (['unit_cost','pour_oz','menu_price','bottle_ml'].includes(prop)){
-                if (prop==='bottle_ml') {
-                  hot.setDataAtRowProp(ri, 'bottle_ml', normalizeBottleMl(nv), 'calc');
-                }
+                if (prop==='bottle_ml') hot.setDataAtRowProp(ri, 'bottle_ml', normalizeBottleMl(nv), 'calc');
                 const c = calcRow(hot.getSourceDataAtRow(ri));
                 hot.setDataAtRowProp(ri, 'cost_per_pour', c.cost_per_pour, 'calc');
                 hot.setDataAtRowProp(ri, 'pour_cost_pct', c.pour_cost_pct, 'calc');
                 hot.setDataAtRowProp(ri, 'suggested_price', c.suggested_price, 'calc');
               }
             }
-          } catch(e) { showErr('afterChange failed.', e); }
+          } catch(e){ showErr('afterChange failed.', e); }
         },
-        afterRender(){ applyRowHighlights(hot); }
+        afterRender: function(){ applyRowHighlights(this); } // use the live instance, not global
       });
 
-      // initial compute/highlight
+      // initial compute/highlight on the live instance
       recalcAllMutating(hot);
       applyRowHighlights(hot);
 
@@ -296,7 +299,10 @@
   }
 
   // ---- One-time UI event listeners (not inside initGrid) ----
-  function onAddRow(){ hot?.alter('insert_row', hot.countRows(), 1); }
+  function onAddRow(){
+    if (!hot || typeof hot.alter !== 'function') return;
+    hot.alter('insert_row', hot.countRows(), 1);
+  }
 
   function onAddCol(){
     if (!hot) return;
