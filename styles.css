@@ -1,0 +1,13 @@
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #1f2937; }
+h1 { font-size: 18px; margin: 0; }
+.controls { display: flex; gap: 8px; align-items: center; }
+button, select {
+  background: #111827; color: #e5e7eb; border: 1px solid #374151; padding: 8px 12px; border-radius: 10px; cursor: pointer;
+}
+button:hover { background: #0b1220; }
+main { padding: 16px 20px; }
+#grid { background: #0b1220; border-radius: 12px; overflow: hidden; }
+footer { padding: 10px 20px 20px; color: #9ca3af; }
+.ht_master, .handsontable { --ht-cell-background-color: #0b1220; --ht-cell-color: #e5e7eb; }
