@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>BevCost – Spreadsheet</title>
 
-  <!-- Handsontable CDN (community evaluation) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.css">
   <script src="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.js"></script>
 
@@ -32,9 +31,11 @@
           <option value="0">No Rounding</option>
         </select>
       </label>
-      <button id="addRowBtn">Add Row</button>
-      <button id="saveBtn">Save</button>
-      <button id="resetBtn">Reset</button>
+
+      <button id="addRowBtn"    type="button">Add Row</button>
+      <button id="addColBtn"    type="button">Add Column</button>
+      <button id="saveBtn"      type="button">Save</button>
+      <button id="resetBtn"     type="button">Reset</button>
     </div>
   </header>
 
@@ -43,9 +44,11 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3</small>
+    <small>Per-location data is saved to your browser. v3.1</small>
   </footer>
 
-  <script src="./app-v3.1.js?v=3"></script>
+  <!-- NEW file name + cache buster -->
+  <script src="./app-v3.1.js?v=3.1"></script>
 </body>
 </html>
+
