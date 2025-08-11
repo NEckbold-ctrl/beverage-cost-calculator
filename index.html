@@ -67,12 +67,12 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.7-rowfix</small>
+    <small>Per-location data is saved to your browser. v3.8-rename</small>
   </footer>
 
   <script>
-  // ---- v3.7-rowfix ----
-  document.getElementById('ver')?.append('v3.7');
+  // ---- v3.8-rename ----
+  document.getElementById('ver')?.append('v3.8');
 
   // Show any JS errors on page
   const errEl = document.getElementById('err');
@@ -89,6 +89,26 @@
   const ML_PER_OZ = 29.5735;
   const STORAGE_KEY_BASE = 'bevcost_demo_';
   const META_KEY_BASE    = 'bevcost_meta_';
+
+  // Default labels (by property key)
+  const DEFAULT_HEADER_BY_PROP = {
+    item: 'Item',
+    bottle_ml: 'Bottle Size',
+    unit_cost: 'Bottle Cost ($)',
+    pour_oz: 'Pour Size (oz)',
+    menu_price: 'Menu Price ($)',
+    cost_per_pour: 'Cost / Pour ($)',
+    pour_cost_pct: 'Pour Cost %',
+    suggested_price: 'Suggested Menu Price ($)'
+  };
+  function defaultLabelForProp(prop){
+    if (DEFAULT_HEADER_BY_PROP[prop]) return DEFAULT_HEADER_BY_PROP[prop];
+    if (prop && String(prop).startsWith('extra_')) {
+      const n = String(prop).split('_')[1] || '';
+      return 'Extra ' + n;
+    }
+    return String(prop || '');
+  }
 
   const els = {
     grid: document.getElementById('grid'),
@@ -177,8 +197,12 @@
     }
   }
 
-  function loadMeta(loc){ return loadJSON(getMetaKey(loc), { extraCols: 0 }); }
-  function saveMeta(loc, meta){ saveJSON(getMetaKey(loc), meta || { extraCols: 0 }); }
+  function loadMeta(loc){
+    const meta = loadJSON(getMetaKey(loc), { extraCols: 0, headerNames: {} });
+    if (!meta.headerNames) meta.headerNames = {};
+    return meta;
+  }
+  function saveMeta(loc, meta){ saveJSON(getMetaKey(loc), meta || { extraCols: 0, headerNames: {} }); }
   function loadData(loc){ return migrateIfNeeded(loadJSON(getDataKey(loc), [])); }
   function saveData(loc, rows){ saveJSON(getDataKey(loc), rows); }
 
@@ -209,24 +233,27 @@
     },
     { data: 'suggested_price', type: 'numeric', readOnly: true, numericFormat: { pattern: '0,0.00' } },
   ];
-  const baseHeaders = [
-    'Item','Bottle Size','Bottle Cost ($)','Pour Size (oz)',
-    'Menu Price ($)','Cost / Pour ($)','Pour Cost %','Suggested Menu Price ($)'
-  ];
 
   function buildColumnsAndHeaders(meta){
-    const cols = baseColumns.slice(), hdrs = baseHeaders.slice();
+    const cols = baseColumns.slice();
     for(let i=1;i<= (meta?.extraCols||0); i++){
       cols.push({ data: 'extra_'+i, type:'text' });
-      hdrs.push('Extra '+i);
     }
-    return { columns: cols, colHeaders: hdrs };
+    return cols;
   }
 
   // State
   let hot = null;
   let currentLocation = els.locationSelect?.value || 'demo-main';
   let currentMeta = loadMeta(currentLocation);
+
+  // Label for a column index, using meta.headerNames[prop] if set
+  function labelFor(instance, col){
+    const cfg = instance.getSettings();
+    const prop = cfg.columns[col].data;
+    const custom = currentMeta.headerNames?.[prop];
+    return custom ?? defaultLabelForProp(prop);
+  }
 
   function applyRowHighlights(instance){
     try{
@@ -254,7 +281,7 @@
       if (typeof window.Handsontable === 'undefined') throw new Error('Handsontable not available on window.');
 
       currentMeta = loadMeta(loc);
-      const {columns, colHeaders} = buildColumnsAndHeaders(currentMeta);
+      const columns = buildColumnsAndHeaders(currentMeta);
       const initialData = loadData(loc);
 
       if (hot) { hot.destroy(); hot = null; }
@@ -265,7 +292,8 @@
           { item:'Tequila Blanco',  bottle_ml:1000, unit_cost:21.00, pour_oz:1.5, menu_price:11 },
           { item:'Limoncello',      bottle_ml:750,  unit_cost:24.70, pour_oz:1.0, menu_price:8 },
         ],
-        columns, colHeaders,
+        columns,
+        colHeaders: (col) => labelFor(hot, col),   // dynamic, rename-aware
         rowHeaders: true,
         licenseKey: 'non-commercial-and-evaluation',
         contextMenu: true,
@@ -273,20 +301,46 @@
         height: 'auto',
         manualColumnResize: true,
         manualRowResize: true,
+
+        // Let users rename headers: double-click any header cell
+        afterGetColHeader: function(col, TH){
+          if (col < 0 || !TH) return;
+          // Avoid re-binding
+          if (TH.dataset.renameBound === '1') return;
+          TH.dataset.renameBound = '1';
+          TH.style.cursor = 'text';
+          TH.title = 'Double‑click to rename';
+          TH.addEventListener('dblclick', () => {
+            try{
+              const inst = this;
+              const prop = inst.getSettings().columns[col].data;
+              const currentLabel = labelFor(inst, col);
+              const next = prompt('Rename column', currentLabel);
+              if (next && next.trim()){
+                currentMeta.headerNames = currentMeta.headerNames || {};
+                currentMeta.headerNames[prop] = next.trim();
+                saveMeta(currentLocation, currentMeta);
+                inst.render(); // redraw with new label
+              }
+            } catch(e){ showErr('Header rename failed.', e); }
+          });
+        },
+
         afterChange(changes, source){
           try{
             if(!changes || source==='calc' || source==='loadData') return;
             for (const [ri, prop, , nv] of changes){
               if (['unit_cost','pour_oz','menu_price','bottle_ml'].includes(prop)){
-                if (prop==='bottle_ml') hot.setDataAtRowProp(ri, 'bottle_ml', normalizeBottleMl(nv), 'calc');
-                const c = calcRow(hot.getSourceDataAtRow(ri));
-                hot.setDataAtRowProp(ri, 'cost_per_pour', c.cost_per_pour, 'calc');
-                hot.setDataAtRowProp(ri, 'pour_cost_pct', c.pour_cost_pct, 'calc');
-                hot.setDataAtRowProp(ri, 'suggested_price', c.suggested_price, 'calc');
+                if (prop==='bottle_ml') this.setDataAtRowProp(ri, 'bottle_ml', normalizeBottleMl(nv), 'calc');
+                const c = calcRow(this.getSourceDataAtRow(ri));
+                this.setDataAtRowProp(ri, 'cost_per_pour', c.cost_per_pour, 'calc');
+                this.setDataAtRowProp(ri, 'pour_cost_pct', c.pour_cost_pct, 'calc');
+                this.setDataAtRowProp(ri, 'suggested_price', c.suggested_price, 'calc');
               }
             }
           } catch(e){ showErr('afterChange failed.', e); }
         },
+
         afterRender: function(){ applyRowHighlights(this); }
       });
 
@@ -302,16 +356,12 @@
     try {
       const rowCount = hot.countRows();
       if (rowCount > 0) {
-        // insert after the selected row if any, else append at end
         const sel = hot.getSelectedLast();
         const baseIndex = sel ? sel[0] : rowCount - 1;
         hot.alter('insert_row_below', baseIndex, 1);
       } else {
-        // empty table: create first row
         hot.alter('insert_row_above', 0, 1);
       }
-
-      // Initialize defaults on the new row
       const newIndex = hot.countRows() - 1;
       hot.setDataAtRowProp(newIndex, 'item', '', 'calc');
       hot.setDataAtRowProp(newIndex, 'bottle_ml', 750, 'calc');
@@ -322,7 +372,6 @@
       recalcAllMutating(hot);
       applyRowHighlights(hot);
     } catch (e) {
-      // Ultimate fallback: append via data reload
       const rows = hot.getSourceData();
       rows.push({ item:'', bottle_ml:750, unit_cost:null, pour_oz:null, menu_price:null });
       hot.loadData(rows);
@@ -335,11 +384,19 @@
     if (!hot) return;
     currentMeta.extraCols = (currentMeta.extraCols||0) + 1;
     const newKey = 'extra_' + currentMeta.extraCols;
+
+    // default header name for this new property
+    currentMeta.headerNames = currentMeta.headerNames || {};
+    currentMeta.headerNames[newKey] = defaultLabelForProp(newKey);
+
     const rows = hot.getSourceData();
     for (const r of rows) if (!(newKey in r)) r[newKey] = '';
-    const cfg = buildColumnsAndHeaders(currentMeta);
-    hot.updateSettings({ columns: cfg.columns, colHeaders: cfg.colHeaders }, false);
+
+    // Rebuild columns and refresh
+    const cols = buildColumnsAndHeaders(currentMeta);
+    hot.updateSettings({ columns: cols, colHeaders: (col)=>labelFor(hot, col) }, false);
     hot.loadData(rows);
+
     saveMeta(currentLocation, currentMeta);
     applyRowHighlights(hot);
   }
@@ -353,15 +410,15 @@
 
   function onReset(){
     if (!hot) return;
-    if (!confirm("Reset this location's sheet and clear custom columns?")) return;
+    if (!confirm("Reset this location's sheet and clear custom columns & names?")) return;
     const rows = [
       { item:'Vodka',           bottle_ml:750,  unit_cost:14.75, pour_oz:1.5, menu_price:9 },
       { item:'Tequila Blanco',  bottle_ml:1000, unit_cost:21.00, pour_oz:1.5, menu_price:11 },
       { item:'Limoncello',      bottle_ml:750,  unit_cost:24.70, pour_oz:1.0, menu_price:8 },
     ];
-    currentMeta = { extraCols: 0 };
-    const cfg = buildColumnsAndHeaders(currentMeta);
-    hot.updateSettings({ columns: cfg.columns, colHeaders: cfg.colHeaders }, false);
+    currentMeta = { extraCols: 0, headerNames: {} };
+    const cols = buildColumnsAndHeaders(currentMeta);
+    hot.updateSettings({ columns: cols, colHeaders: (col)=>labelFor(hot, col) }, false);
     hot.loadData(rows);
     recalcAllMutating(hot);
     saveData(currentLocation, rows);
@@ -397,4 +454,3 @@
   </script>
 </body>
 </html>
-
