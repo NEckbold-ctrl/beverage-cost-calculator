@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BevCost – Spreadsheet</title>
+
+  <!-- Handsontable CDN (community evaluation) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.js"></script>
+
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header>
+    <h1>BevCost Spreadsheet (Local Demo)</h1>
+    <div class="controls">
+      <select id="locationSelect">
+        <option value="demo-main">Demo – Main Bar</option>
+        <option value="demo-annex">Demo – Annex</option>
+      </select>
+      <button id="addRowBtn">Add Row</button>
+      <button id="saveBtn">Save</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="grid"></div>
+  </main>
+
+  <footer>
+    <small>Data is saved to your browser (per location). Cloud sync comes in the next step.</small>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
