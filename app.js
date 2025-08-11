@@ -1,22 +1,102 @@
+// --- BevCost Spreadsheet (M1+): Bottle Size + Pour Cost --- //
+
 const STORAGE_KEY_BASE = "bevcost_demo_";
+const ML_PER_OZ = 29.5735;
+
+const BOTTLE_OPTIONS = [
+  { label: "750 ml", value: 750 },
+  { label: "1 L", value: 1000 },
+];
 
 const columns = [
   { data: "item", type: "text" },
-  { data: "unit_cost", type: "numeric", numericFormat: { pattern: '0,0.00' } },
-  { data: "qty", type: "numeric", numericFormat: { pattern: '0,0.[000]' } },
-  { data: "total", type: "numeric", readOnly: true, numericFormat: { pattern: '0,0.00' } },
+  {
+    data: "bottle_ml",
+    type: "dropdown",
+    source: BOTTLE_OPTIONS.map(o => o.label),
+    strict: true,
+    allowInvalid: false,
+    renderer: (instance, td, row, col, prop, value) => {
+      // Show pretty label even though we store numeric ml
+      const asNumber = parseInt(String(value).replace(/\D/g, ""), 10);
+      const label = asNumber === 1000 ? "1 L" : "750 ml";
+      Handsontable.renderers.TextRenderer(instance, td, row, col, prop, label);
+    },
+    editor: Handsontable.editors.DropdownEditor, // show dropdown
+  },
+  { data: "unit_cost", type: "numeric", numericFormat: { pattern: "0,0.00" } }, // bottle cost $
+  { data: "pour_oz", type: "numeric", numericFormat: { pattern: "0,0.[00]" } }, // per drink pour size in ounces
+  { data: "menu_price", type: "numeric", numericFormat: { pattern: "0,0.00" } }, // sell price $
+  { data: "cost_per_pour", type: "numeric", readOnly: true, numericFormat: { pattern: "0,0.00" } },
+  {
+    data: "pour_cost_pct",
+    type: "numeric",
+    readOnly: true,
+    numericFormat: { pattern: "0,0.[0]%" },
+    renderer: (instance, td, row, col, prop, value) => {
+      // Render percentage nicely and color hint if over 11.5%
+      const pct = Number(value) || 0;
+      td.style.color = pct > 11.5 ? "#fca5a5" : "#a7f3d0";
+      Handsontable.renderers.TextRenderer(instance, td, row, col, prop, pct ? `${pct.toFixed(1)}%` : "");
+    }
+  },
 ];
 
-const colHeaders = ["Item", "Unit Cost", "Qty", "Total ($)"];
+const colHeaders = [
+  "Item",
+  "Bottle Size",
+  "Bottle Cost ($)",
+  "Pour Size (oz)",
+  "Menu Price ($)",
+  "Cost / Pour ($)",
+  "Pour Cost %",
+];
+
+// --- Helpers --- //
+
+function normalizeBottleMl(value) {
+  // Accept "750 ml", "750", "1 L", "1000", etc.
+  if (typeof value === "number") return value;
+  const n = parseInt(String(value).replace(/\D/g, ""), 10);
+  if (!n) return 750; // default
+  return n === 1000 ? 1000 : 750;
+}
 
 function calcRow(row) {
-  const cost = parseFloat(row.unit_cost ?? 0) || 0;
-  const qty  = parseFloat(row.qty ?? 0) || 0;
-  return parseFloat((cost * qty).toFixed(2));
+  const bottle_ml = normalizeBottleMl(row.bottle_ml);
+  const bottle_cost = parseFloat(row.unit_cost ?? 0) || 0;
+  const pour_oz = parseFloat(row.pour_oz ?? 0) || 0;
+  const menu_price = parseFloat(row.menu_price ?? 0) || 0;
+
+  // Convert pour to ml
+  const pour_ml = pour_oz * ML_PER_OZ;
+  // Protect against divide-by-zero
+  if (bottle_ml <= 0 || pour_ml <= 0) {
+    return { cost_per_pour: 0, pour_cost_pct: 0 };
+  }
+
+  // Cost per pour = bottle_cost * (pour_ml / bottle_ml)
+  const cost_per_pour = bottle_cost * (pour_ml / bottle_ml);
+
+  // Pour cost % = (cost_per_pour / menu_price) * 100
+  const pour_cost_pct = menu_price > 0 ? (cost_per_pour / menu_price) * 100 : 0;
+
+  return {
+    cost_per_pour: Number(cost_per_pour.toFixed(2)),
+    pour_cost_pct: Number(pour_cost_pct.toFixed(1)),
+  };
 }
 
 function recalcAll(data) {
-  return (data || []).map(r => ({ ...r, total: calcRow(r) }));
+  return (data || []).map(r => {
+    const computed = calcRow(r);
+    return {
+      ...r,
+      bottle_ml: normalizeBottleMl(r.bottle_ml),
+      cost_per_pour: computed.cost_per_pour,
+      pour_cost_pct: computed.pour_cost_pct,
+    };
+  });
 }
 
 function getStorageKey(locationId) {
@@ -26,7 +106,12 @@ function getStorageKey(locationId) {
 function loadData(locationId) {
   const raw = localStorage.getItem(getStorageKey(locationId));
   if (!raw) return [];
-  try { return JSON.parse(raw); } catch { return []; }
+  try {
+    const parsed = JSON.parse(raw);
+    return recalcAll(parsed);
+  } catch {
+    return [];
+  }
 }
 
 function saveData(locationId, data) {
@@ -35,11 +120,31 @@ function saveData(locationId, data) {
 
 function createExampleRows() {
   return recalcAll([
-    { item: "Vodka 750ml", unit_cost: 14.75, qty: 6 },
-    { item: "Lime Juice 32oz", unit_cost: 4.76, qty: 3 },
-    { item: "Oranges (100ct)", unit_cost: 52.50, qty: 1 },
+    {
+      item: "Vodka",
+      bottle_ml: 750,
+      unit_cost: 14.75,
+      pour_oz: 1.5,
+      menu_price: 9,
+    },
+    {
+      item: "Tequila Blanco",
+      bottle_ml: 1000, // 1 L
+      unit_cost: 21.00,
+      pour_oz: 1.5,
+      menu_price: 11,
+    },
+    {
+      item: "Limoncello",
+      bottle_ml: 750,
+      unit_cost: 24.70,
+      pour_oz: 1.0,
+      menu_price: 8,
+    },
   ]);
 }
+
+// --- DOM + Grid --- //
 
 const gridEl = document.getElementById("grid");
 const locationSelect = document.getElementById("locationSelect");
@@ -67,22 +172,29 @@ function initGrid(locationId) {
     manualRowResize: true,
     afterChange(changes, source) {
       if (!changes || source === "loadData") return;
+
+      // Apply live recalculation when relevant fields change
       const data = hot.getSourceData();
-      // Recalculate totals if unit_cost or qty changed
-      for (const [row, prop] of changes.map(c => [c[0], c[1]])) {
-        if (prop === "unit_cost" || prop === "qty") {
-          const r = data[row];
-          r.total = calcRow(r);
+      for (const [rowIndex, prop, oldVal, newVal] of changes) {
+        if (["unit_cost", "pour_oz", "menu_price", "bottle_ml"].includes(prop)) {
+          // If bottle size edited via dropdown, store as number (750 or 1000)
+          if (prop === "bottle_ml") {
+            data[rowIndex].bottle_ml = normalizeBottleMl(newVal);
+          }
+          const r = data[rowIndex];
+          const computed = calcRow(r);
+          r.cost_per_pour = computed.cost_per_pour;
+          r.pour_cost_pct = computed.pour_cost_pct;
         }
       }
-      // Sync the rendered data
+
+      // Re-render with updated computed fields
       hot.loadData(data);
     }
   });
 }
 
 function switchLocation(newLoc) {
-  // Save current before switching
   saveData(currentLocation, hot.getSourceData());
   currentLocation = newLoc;
   initGrid(currentLocation);
@@ -107,3 +219,4 @@ resetBtn.addEventListener("click", () => {
 });
 
 initGrid(currentLocation);
+
