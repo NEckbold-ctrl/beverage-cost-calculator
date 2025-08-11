@@ -67,12 +67,12 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.6-stable</small>
+    <small>Per-location data is saved to your browser. v3.7-rowfix</small>
   </footer>
 
   <script>
-  // ---- v3.6-stable ----
-  document.getElementById('ver')?.append('v3.6');
+  // ---- v3.7-rowfix ----
+  document.getElementById('ver')?.append('v3.7');
 
   // Show any JS errors on page
   const errEl = document.getElementById('err');
@@ -245,7 +245,6 @@
         }
       }
     } catch(e){
-      // swallow highlight errors; never block UI
       console.warn('highlight skipped', e);
     }
   }
@@ -288,10 +287,9 @@
             }
           } catch(e){ showErr('afterChange failed.', e); }
         },
-        afterRender: function(){ applyRowHighlights(this); } // use the live instance, not global
+        afterRender: function(){ applyRowHighlights(this); }
       });
 
-      // initial compute/highlight on the live instance
       recalcAllMutating(hot);
       applyRowHighlights(hot);
 
@@ -300,8 +298,37 @@
 
   // ---- One-time UI event listeners (not inside initGrid) ----
   function onAddRow(){
-    if (!hot || typeof hot.alter !== 'function') return;
-    hot.alter('insert_row', hot.countRows(), 1);
+    if (!hot) return;
+    try {
+      const rowCount = hot.countRows();
+      if (rowCount > 0) {
+        // insert after the selected row if any, else append at end
+        const sel = hot.getSelectedLast();
+        const baseIndex = sel ? sel[0] : rowCount - 1;
+        hot.alter('insert_row_below', baseIndex, 1);
+      } else {
+        // empty table: create first row
+        hot.alter('insert_row_above', 0, 1);
+      }
+
+      // Initialize defaults on the new row
+      const newIndex = hot.countRows() - 1;
+      hot.setDataAtRowProp(newIndex, 'item', '', 'calc');
+      hot.setDataAtRowProp(newIndex, 'bottle_ml', 750, 'calc');
+      hot.setDataAtRowProp(newIndex, 'unit_cost', null, 'calc');
+      hot.setDataAtRowProp(newIndex, 'pour_oz', null, 'calc');
+      hot.setDataAtRowProp(newIndex, 'menu_price', null, 'calc');
+
+      recalcAllMutating(hot);
+      applyRowHighlights(hot);
+    } catch (e) {
+      // Ultimate fallback: append via data reload
+      const rows = hot.getSourceData();
+      rows.push({ item:'', bottle_ml:750, unit_cost:null, pour_oz:null, menu_price:null });
+      hot.loadData(rows);
+      recalcAllMutating(hot);
+      applyRowHighlights(hot);
+    }
   }
 
   function onAddCol(){
@@ -370,3 +397,4 @@
   </script>
 </body>
 </html>
+
