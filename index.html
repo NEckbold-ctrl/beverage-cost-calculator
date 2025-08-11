@@ -5,10 +5,29 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>BevCost – Spreadsheet</title>
 
+  <!-- Handsontable (must be before our script) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.css">
   <script src="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.js"></script>
 
-  <link rel="stylesheet" href="./styles.css?v=3">
+  <style>
+    * { box-sizing: border-box; }
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #1f2937; }
+    h1 { font-size: 18px; margin: 0; }
+    h1 small { color: #94a3b8; margin-left: 6px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    label { display: inline-flex; align-items: center; gap: 6px; }
+    button, select, input[type="number"] { background: #111827; color: #e5e7eb; border: 1px solid #374151; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+    input[type="number"] { width: 90px; }
+    button:hover { background: #0b1220; }
+    main { padding: 16px 20px; }
+    #grid { background: #0b1220; border-radius: 12px; overflow: hidden; }
+    footer { padding: 10px 20px 20px; color: #9ca3af; }
+    .htInvalidCost { background-color: rgba(250, 100, 100, 0.15) !important; }
+    .htGoodCost    { background-color: rgba(16, 185, 129, 0.12) !important; }
+    pre#err { white-space: pre-wrap; padding: 12px; margin: 12px 20px; border: 1px solid #374151; border-radius: 8px; background: #111827; color: #fda4af; display: none; }
+  </style>
 </head>
 <body>
   <header>
@@ -31,24 +50,254 @@
           <option value="0">No Rounding</option>
         </select>
       </label>
-
-      <button id="addRowBtn"    type="button">Add Row</button>
-      <button id="addColBtn"    type="button">Add Column</button>
-      <button id="saveBtn"      type="button">Save</button>
-      <button id="resetBtn"     type="button">Reset</button>
+      <button id="addRowBtn" type="button">Add Row</button>
+      <button id="addColBtn" type="button">Add Column</button>
+      <button id="saveBtn"   type="button">Save</button>
+      <button id="resetBtn"  type="button">Reset</button>
     </div>
   </header>
 
   <main>
+    <pre id="err"></pre>
     <div id="grid"></div>
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.1</small>
+    <small>Per-location data is saved to your browser. v3.2-inline</small>
   </footer>
 
-  <!-- NEW file name + cache buster -->
-  <script src="./app-v3.1.js?v=3.1"></script>
+  <script>
+  // ---- Inline script: v3.2-inline (rows/cols guaranteed) ----
+  document.getElementById('ver')?.append('v3.2');
+
+  const ML_PER_OZ = 29.5735;
+  const STORAGE_KEY_BASE = 'bevcost_demo_';
+  const META_KEY_BASE    = 'bevcost_meta_';
+  const BOTTLE_OPTIONS = [{ label: '750 ml', value: 750 }, { label: '1 L', value: 1000 }];
+
+  const els = {
+    grid: document.getElementById('grid'),
+    err: document.getElementById('err'),
+    locationSelect: document.getElementById('locationSelect'),
+    addRowBtn: document.getElementById('addRowBtn'),
+    addColBtn: document.getElementById('addColBtn'),
+    saveBtn: document.getElementById('saveBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+    targetPct: document.getElementById('targetPct'),
+    rounding: document.getElementById('rounding'),
+  };
+
+  function showErr(msg, e) {
+    els.err.style.display = 'block';
+    els.err.textContent = '[BevCost Error]\\n' + msg + (e ? '\\n' + (e.stack || e.message || e) : '');
+  }
+
+  if (typeof window.Handsontable === 'undefined') {
+    showErr('Handsontable failed to load. Check the two CDN tags in <head>.');
+  }
+
+  function normalizeBottleMl(v){ if (typeof v==='number') return v===1000?1000:750; const n=parseInt(String(v||'').replace(/\\D/g,''),10); return n===1000?1000:750; }
+  function getTargetPct(){ const v=parseFloat(els.targetPct?.value||'11.5'); return isFinite(v)&&v>0?v:11.5; }
+  function getRounding(){ const v=parseFloat(els.rounding?.value||'0.25'); return isFinite(v)?v:0.25; }
+  function roundToIncrement(a,inc){ if(!inc||inc<=0) return a; return Math.round(a/inc)*inc; }
+
+  const baseColumns = [
+    { data: 'item', type: 'text' },
+    {
+      data: 'bottle_ml',
+      type: 'dropdown',
+      source: BOTTLE_OPTIONS.map(o=>o.label),
+      strict: true, allowInvalid: false,
+      renderer: (inst, td, row, col, prop, value) => {
+        const n = parseInt(String(value).replace(/\\D/g,''),10);
+        const label = n===1000 ? '1 L' : '750 ml';
+        Handsontable.renderers.TextRenderer(inst, td, row, col, prop, label);
+      },
+      editor: Handsontable.editors.DropdownEditor,
+    },
+    { data: 'unit_cost',  type: 'numeric', numericFormat: { pattern: '0,0.00' } },
+    { data: 'pour_oz',    type: 'numeric', numericFormat: { pattern: '0,0.[00]' } },
+    { data: 'menu_price', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
+    { data: 'cost_per_pour', type: 'numeric', readOnly: true, numericFormat: { pattern: '0,0.00' } },
+    {
+      data: 'pour_cost_pct', type: 'numeric', readOnly: true,
+      renderer: (inst, td, row, col, prop, value) => {
+        const pct = Number(value)||0;
+        td.style.color = pct > getTargetPct() ? '#fca5a5' : '#a7f3d0';
+        Handsontable.renderers.TextRenderer(inst, td, row, col, prop, pct ? pct.toFixed(1)+'%' : '');
+      }
+    },
+    { data: 'suggested_price', type: 'numeric', readOnly: true, numericFormat: { pattern: '0,0.00' } },
+  ];
+  const baseHeaders = [
+    'Item','Bottle Size','Bottle Cost ($)','Pour Size (oz)',
+    'Menu Price ($)','Cost / Pour ($)','Pour Cost %','Suggested Menu Price ($)'
+  ];
+
+  function getMetaKey(loc){ return META_KEY_BASE + loc; }
+  function getDataKey(loc){ return STORAGE_KEY_BASE + loc; }
+  function loadJSON(key, fallback){ try{ const raw=localStorage.getItem(key); return raw?JSON.parse(raw):fallback; } catch{ return fallback; } }
+  function saveJSON(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
+
+  function migrateIfNeeded(rows){
+    if(!Array.isArray(rows)) return [];
+    const hasNew = rows.some(r => 'pour_oz' in r || 'menu_price' in r || 'suggested_price' in r);
+    if (hasNew) return rows;
+    return rows.map(r => ({ item: r.item??'', bottle_ml:750, unit_cost:Number(r.unit_cost??0), pour_oz:1.5, menu_price:'' }));
+  }
+
+  function calcRow(row){
+    const bottle_ml = normalizeBottleMl(row.bottle_ml);
+    const bottle_cost = parseFloat(row.unit_cost ?? 0) || 0;
+    const pour_oz = parseFloat(row.pour_oz ?? 0) || 0;
+    const menu_price = parseFloat(row.menu_price ?? 0) || 0;
+
+    const pour_ml = pour_oz * ML_PER_OZ;
+    let cpp=0, pct=0, sugg=0;
+    if (bottle_ml>0 && pour_ml>0){
+      cpp = bottle_cost * (pour_ml / bottle_ml);
+      if (menu_price>0) pct = (cpp / menu_price) * 100;
+      const target = getTargetPct();
+      if (target>0){
+        const raw = cpp / (target/100);
+        const inc = getRounding();
+        sugg = inc ? roundToIncrement(raw, inc) : raw;
+      }
+    }
+    return { cost_per_pour:+cpp.toFixed(2), pour_cost_pct:+pct.toFixed(1), suggested_price:+sugg.toFixed(2) };
+  }
+
+  function recalcAll(data){
+    return (data||[]).map(r=>{
+      const c = calcRow(r);
+      return {...r, bottle_ml: normalizeBottleMl(r.bottle_ml), cost_per_pour:c.cost_per_pour, pour_cost_pct:c.pour_cost_pct, suggested_price:c.suggested_price };
+    });
+  }
+
+  function loadMeta(loc){ return loadJSON(getMetaKey(loc), { extraCols: 0 }); }
+  function saveMeta(loc, meta){ saveJSON(getMetaKey(loc), meta || { extraCols: 0 }); }
+  function loadData(loc){ return recalcAll(migrateIfNeeded(loadJSON(getDataKey(loc), []))); }
+  function saveData(loc, rows){ saveJSON(getDataKey(loc), recalcAll(rows)); }
+
+  function buildColumnsAndHeaders(meta){
+    const cols = baseColumns.slice(), hdrs = baseHeaders.slice();
+    for(let i=1;i<= (meta?.extraCols||0); i++){
+      cols.push({ data: 'extra_'+i, type:'text' });
+      hdrs.push('Extra '+i);
+    }
+    return { columns: cols, colHeaders: hdrs };
+  }
+
+  let hot, currentLocation = els.locationSelect?.value || 'demo-main', currentMeta = loadMeta(currentLocation);
+
+  function applyRowHighlights(instance){
+    const target = getTargetPct();
+    instance.addHookOnce('afterRender', ()=>{
+      const count = instance.countRows();
+      for(let r=0;r<count;r++){
+        const rowData = instance.getSourceDataAtRow(r);
+        const pct = Number(rowData?.pour_cost_pct);
+        for(let c=0;c<instance.countCols();c++){
+          const td = instance.getCell(r,c); if(!td) continue;
+          td.classList.remove('htInvalidCost','htGoodCost');
+          if (!isNaN(pct) && pct>0) td.classList.add(pct>target?'htInvalidCost':'htGoodCost');
+        }
+      }
+    });
+  }
+
+  function initGrid(loc){
+    try{
+      currentMeta = loadMeta(loc);
+      const {columns, colHeaders} = buildColumnsAndHeaders(currentMeta);
+      const initialData = loadData(loc);
+      if (hot) hot.destroy();
+      hot = new Handsontable(els.grid, {
+        data: initialData.length ? initialData : recalcAll([
+          { item:'Vodka', bottle_ml:750, unit_cost:14.75, pour_oz:1.5, menu_price:9 },
+          { item:'Tequila Blanco', bottle_ml:1000, unit_cost:21.00, pour_oz:1.5, menu_price:11 },
+          { item:'Limoncello', bottle_ml:750, unit_cost:24.70, pour_oz:1.0, menu_price:8 },
+        ]),
+        columns, colHeaders,
+        rowHeaders: true,
+        licenseKey: 'non-commercial-and-evaluation',
+        contextMenu: true,
+        stretchH: 'all',
+        height: 'auto',
+        manualColumnResize: true,
+        manualRowResize: true,
+        afterChange(changes, source){
+          if(!changes || source==='loadData') return;
+          const data = hot.getSourceData();
+          let reload = false;
+          for (const [ri, prop, , nv] of changes){
+            if (['unit_cost','pour_oz','menu_price','bottle_ml'].includes(prop)){
+              if (prop==='bottle_ml') data[ri].bottle_ml = normalizeBottleMl(nv);
+              const c = calcRow(data[ri]);
+              data[ri].cost_per_pour = c.cost_per_pour;
+              data[ri].pour_cost_pct = c.pour_cost_pct;
+              data[ri].suggested_price = c.suggested_price;
+              reload = true;
+            }
+          }
+          if (reload){ hot.loadData(data); applyRowHighlights(hot); }
+        },
+        afterRender(){ applyRowHighlights(hot); }
+      });
+
+      // Buttons
+      els.addRowBtn?.addEventListener('click', ()=> {
+        hot.alter('insert_row', hot.countRows(), 1);
+      });
+      els.addColBtn?.addEventListener('click', ()=> {
+        currentMeta.extraCols = (currentMeta.extraCols||0) + 1;
+        const newKey = 'extra_' + currentMeta.extraCols;
+        const rows = hot.getSourceData();
+        for (const r of rows) if (!(newKey in r)) r[newKey] = '';
+        const cfg = buildColumnsAndHeaders(currentMeta);
+        hot.updateSettings({ columns: cfg.columns, colHeaders: cfg.colHeaders }, false);
+        hot.loadData(rows);
+        saveMeta(currentLocation, currentMeta);
+        applyRowHighlights(hot);
+      });
+      els.saveBtn?.addEventListener('click', ()=> {
+        saveData(currentLocation, hot.getSourceData());
+        saveMeta(currentLocation, currentMeta);
+        alert('Saved locally for: ' + currentLocation);
+      });
+      els.resetBtn?.addEventListener('click', ()=> {
+        if (!confirm("Reset this location's sheet and clear custom columns?")) return;
+        const rows = recalcAll([
+          { item:'Vodka', bottle_ml:750, unit_cost:14.75, pour_oz:1.5, menu_price:9 },
+          { item:'Tequila Blanco', bottle_ml:1000, unit_cost:21.00, pour_oz:1.5, menu_price:11 },
+          { item:'Limoncello', bottle_ml:750, unit_cost:24.70, pour_oz:1.0, menu_price:8 },
+        ]);
+        currentMeta = { extraCols: 0 };
+        const cfg = buildColumnsAndHeaders(currentMeta);
+        hot.updateSettings({ columns: cfg.columns, colHeaders: cfg.colHeaders }, false);
+        hot.loadData(rows);
+        saveData(currentLocation, rows);
+        saveMeta(currentLocation, currentMeta);
+        applyRowHighlights(hot);
+      });
+      els.locationSelect?.addEventListener('change', (e)=> {
+        saveData(currentLocation, hot.getSourceData());
+        saveMeta(currentLocation, currentMeta);
+        currentLocation = e.target.value || 'demo-main';
+        initGrid(currentLocation);
+      });
+      els.targetPct?.addEventListener('change', ()=> {
+        const data = recalcAll(hot.getSourceData()); hot.loadData(data); applyRowHighlights(hot);
+      });
+      els.rounding?.addEventListener('change', ()=> {
+        const data = recalcAll(hot.getSourceData()); hot.loadData(data); applyRowHighlights(hot);
+      });
+
+    } catch(e){ showErr('Grid initialization failed.', e); }
+  }
+
+  initGrid(els.locationSelect?.value || 'demo-main');
+  </script>
 </body>
 </html>
 
