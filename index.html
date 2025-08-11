@@ -67,12 +67,12 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.8-rename</small>
+    <small>Per-location data is saved to your browser. v3.9-headersafe</small>
   </footer>
 
   <script>
-  // ---- v3.8-rename ----
-  document.getElementById('ver')?.append('v3.8');
+  // ---- v3.9-headersafe ----
+  document.getElementById('ver')?.append('v3.9');
 
   // Show any JS errors on page
   const errEl = document.getElementById('err');
@@ -90,7 +90,7 @@
   const STORAGE_KEY_BASE = 'bevcost_demo_';
   const META_KEY_BASE    = 'bevcost_meta_';
 
-  // Default labels (by property key)
+  // Default labels per data prop
   const DEFAULT_HEADER_BY_PROP = {
     item: 'Item',
     bottle_ml: 'Bottle Size',
@@ -206,13 +206,13 @@
   function loadData(loc){ return migrateIfNeeded(loadJSON(getDataKey(loc), [])); }
   function saveData(loc, rows){ saveJSON(getDataKey(loc), rows); }
 
-  // Dynamic columns/headers
-  const baseColumns = [
+  // Base columns (no headers here)
+  const BASE_COLS = [
     { data: 'item', type: 'text' },
     {
       data: 'bottle_ml',
       type: 'dropdown',
-      source: [750, 1000],  // store numbers; render labels
+      source: [750, 1000],
       strict: true, allowInvalid: false,
       renderer: (inst, td, row, col, prop, value, cellProps) => {
         const label = Number(value) === 1000 ? '1 L' : '750 ml';
@@ -234,26 +234,29 @@
     { data: 'suggested_price', type: 'numeric', readOnly: true, numericFormat: { pattern: '0,0.00' } },
   ];
 
-  function buildColumnsAndHeaders(meta){
-    const cols = baseColumns.slice();
+  // Build columns based on meta.extraCols
+  function buildColumns(meta){
+    const cols = BASE_COLS.slice();
     for(let i=1;i<= (meta?.extraCols||0); i++){
       cols.push({ data: 'extra_'+i, type:'text' });
     }
     return cols;
   }
 
+  // Safe header factory that does NOT touch `hot` during init
+  function makeHeaderGetter(columns, meta){
+    return function(colIndex){
+      const colDef = columns[colIndex];
+      const prop = colDef ? colDef.data : undefined;
+      const custom = meta?.headerNames?.[prop];
+      return custom ?? defaultLabelForProp(prop);
+    };
+  }
+
   // State
   let hot = null;
   let currentLocation = els.locationSelect?.value || 'demo-main';
   let currentMeta = loadMeta(currentLocation);
-
-  // Label for a column index, using meta.headerNames[prop] if set
-  function labelFor(instance, col){
-    const cfg = instance.getSettings();
-    const prop = cfg.columns[col].data;
-    const custom = currentMeta.headerNames?.[prop];
-    return custom ?? defaultLabelForProp(prop);
-  }
 
   function applyRowHighlights(instance){
     try{
@@ -281,7 +284,8 @@
       if (typeof window.Handsontable === 'undefined') throw new Error('Handsontable not available on window.');
 
       currentMeta = loadMeta(loc);
-      const columns = buildColumnsAndHeaders(currentMeta);
+      const columns = buildColumns(currentMeta);
+      const headerGetter = makeHeaderGetter(columns, currentMeta);
       const initialData = loadData(loc);
 
       if (hot) { hot.destroy(); hot = null; }
@@ -293,7 +297,7 @@
           { item:'Limoncello',      bottle_ml:750,  unit_cost:24.70, pour_oz:1.0, menu_price:8 },
         ],
         columns,
-        colHeaders: (col) => labelFor(hot, col),   // dynamic, rename-aware
+        colHeaders: headerGetter,            // safe, no global access
         rowHeaders: true,
         licenseKey: 'non-commercial-and-evaluation',
         contextMenu: true,
@@ -302,10 +306,9 @@
         manualColumnResize: true,
         manualRowResize: true,
 
-        // Let users rename headers: double-click any header cell
+        // Double‑click any header to rename
         afterGetColHeader: function(col, TH){
           if (col < 0 || !TH) return;
-          // Avoid re-binding
           if (TH.dataset.renameBound === '1') return;
           TH.dataset.renameBound = '1';
           TH.style.cursor = 'text';
@@ -313,8 +316,9 @@
           TH.addEventListener('dblclick', () => {
             try{
               const inst = this;
-              const prop = inst.getSettings().columns[col].data;
-              const currentLabel = labelFor(inst, col);
+              const colsNow = inst.getSettings().columns;
+              const prop = colsNow[col]?.data;
+              const currentLabel = currentMeta.headerNames?.[prop] ?? defaultLabelForProp(prop);
               const next = prompt('Rename column', currentLabel);
               if (next && next.trim()){
                 currentMeta.headerNames = currentMeta.headerNames || {};
@@ -385,16 +389,16 @@
     currentMeta.extraCols = (currentMeta.extraCols||0) + 1;
     const newKey = 'extra_' + currentMeta.extraCols;
 
-    // default header name for this new property
     currentMeta.headerNames = currentMeta.headerNames || {};
     currentMeta.headerNames[newKey] = defaultLabelForProp(newKey);
 
     const rows = hot.getSourceData();
     for (const r of rows) if (!(newKey in r)) r[newKey] = '';
 
-    // Rebuild columns and refresh
-    const cols = buildColumnsAndHeaders(currentMeta);
-    hot.updateSettings({ columns: cols, colHeaders: (col)=>labelFor(hot, col) }, false);
+    // Rebuild columns and header getter with the UPDATED meta
+    const newColumns = buildColumns(currentMeta);
+    const newHeaderGetter = makeHeaderGetter(newColumns, currentMeta);
+    hot.updateSettings({ columns: newColumns, colHeaders: newHeaderGetter }, false);
     hot.loadData(rows);
 
     saveMeta(currentLocation, currentMeta);
@@ -417,8 +421,11 @@
       { item:'Limoncello',      bottle_ml:750,  unit_cost:24.70, pour_oz:1.0, menu_price:8 },
     ];
     currentMeta = { extraCols: 0, headerNames: {} };
-    const cols = buildColumnsAndHeaders(currentMeta);
-    hot.updateSettings({ columns: cols, colHeaders: (col)=>labelFor(hot, col) }, false);
+
+    const columns = buildColumns(currentMeta);
+    const headerGetter = makeHeaderGetter(columns, currentMeta);
+    hot.updateSettings({ columns, colHeaders: headerGetter }, false);
+
     hot.loadData(rows);
     recalcAllMutating(hot);
     saveData(currentLocation, rows);
@@ -454,3 +461,4 @@
   </script>
 </body>
 </html>
+
