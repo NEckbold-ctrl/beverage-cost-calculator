@@ -67,12 +67,12 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.9-headersafe</small>
+    <small>Per-location data is saved to your browser. v3.10-ceil</small>
   </footer>
 
   <script>
-  // ---- v3.9-headersafe ----
-  document.getElementById('ver')?.append('v3.9');
+  // ---- v3.10-ceil ----
+  document.getElementById('ver')?.append('v3.10');
 
   // Show any JS errors on page
   const errEl = document.getElementById('err');
@@ -139,7 +139,12 @@
   }
   function getTargetPct(){ const v=parseFloat(els.targetPct?.value||'11.5'); return isFinite(v)&&v>0?v:11.5; }
   function getRounding(){ const v=parseFloat(els.rounding?.value||'0.25'); return isFinite(v)?v:0.25; }
-  function roundToIncrement(a,inc){ if(!inc||inc<=0) return a; return Math.round(a/inc)*inc; }
+
+  // ALWAYS ROUND UP to the next increment
+  function roundToIncrement(a, inc){
+    if(!inc || inc <= 0) return a;
+    return Math.ceil(a / inc) * inc;
+  }
 
   function getMetaKey(loc){ return META_KEY_BASE + loc; }
   function getDataKey(loc){ return STORAGE_KEY_BASE + loc; }
