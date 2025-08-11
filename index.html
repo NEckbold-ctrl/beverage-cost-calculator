@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>BevCost – Spreadsheet</title>
 
-  <!-- (Optional but safe) numbro for numericFormat; avoids "numbro is not defined" issues on some builds -->
+  <!-- Optional: numbro for numericFormat safety -->
   <script src="https://cdn.jsdelivr.net/npm/numbro@2.3.6/dist/numbro.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/numbro@2.3.6/dist/languages.min.js"></script>
 
-  <!-- Handsontable (must be before our script) -->
+  <!-- Handsontable -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.css">
   <script src="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.js"></script>
 
@@ -67,14 +67,14 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.4-debug</small>
+    <small>Per-location data is saved to your browser. v3.5-fix</small>
   </footer>
 
   <script>
-  // ---- Inline script: v3.4-debug ----
-  document.getElementById('ver')?.append('v3.4');
+  // ---- v3.5-fix ----
+  document.getElementById('ver')?.append('v3.5');
 
-  // Catch any JS errors and show them on the page
+  // Show any JS errors on page
   const errEl = document.getElementById('err');
   window.addEventListener('error', (e) => {
     errEl.style.display = 'block';
@@ -104,7 +104,7 @@
 
   function showErr(msg, e) {
     els.err.style.display = 'block';
-    els.err.textContent = '[BevCost Error]\\n' + msg + (e ? '\\n' + (e.stack || e.message || e) : '');
+    els.err.textContent = '[BevCost Error]\n' + msg + (e ? '\n' + (e.stack || e.message || e) : '');
   }
 
   if (typeof window.Handsontable === 'undefined') {
@@ -188,11 +188,11 @@
     {
       data: 'bottle_ml',
       type: 'dropdown',
-      source: [750, 1000],  // store numbers; render user-friendly labels
+      source: [750, 1000],  // store numbers; render labels
       strict: true, allowInvalid: false,
-      renderer: (inst, td, row, col, prop, value) => {
+      renderer: (inst, td, row, col, prop, value, cellProps) => {
         const label = Number(value) === 1000 ? '1 L' : '750 ml';
-        Handsontable.renderers.TextRenderer(inst, td, row, col, prop, label);
+        Handsontable.renderers.TextRenderer(inst, td, row, col, prop, label, cellProps);
       }
     },
     { data: 'unit_cost',  type: 'numeric', numericFormat: { pattern: '0,0.00' } },
@@ -201,10 +201,10 @@
     { data: 'cost_per_pour', type: 'numeric', readOnly: true, numericFormat: { pattern: '0,0.00' } },
     {
       data: 'pour_cost_pct', type: 'numeric', readOnly: true,
-      renderer: (inst, td, row, col, prop, value) => {
+      renderer: (inst, td, row, col, prop, value, cellProps) => {
         const pct = Number(value)||0;
         td.style.color = pct > getTargetPct() ? '#fca5a5' : '#a7f3d0';
-        Handsontable.renderers.TextRenderer(inst, td, row, col, prop, pct ? pct.toFixed(1)+'%' : '');
+        Handsontable.renderers.TextRenderer(inst, td, row, col, prop, pct ? pct.toFixed(1)+'%' : '', cellProps);
       }
     },
     { data: 'suggested_price', type: 'numeric', readOnly: true, numericFormat: { pattern: '0,0.00' } },
@@ -364,4 +364,3 @@
   </script>
 </body>
 </html>
-
