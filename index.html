@@ -9,16 +9,29 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.css">
   <script src="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.js"></script>
 
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=3">
 </head>
 <body>
   <header>
-    <h1>BevCost Spreadsheet (Local Demo)</h1>
+    <h1>BevCost Spreadsheet <small id="ver"></small></h1>
     <div class="controls">
-      <select id="locationSelect">
-        <option value="demo-main">Demo – Main Bar</option>
-        <option value="demo-annex">Demo – Annex</option>
-      </select>
+      <label>Location:
+        <select id="locationSelect">
+          <option value="demo-main">Demo – Main Bar</option>
+          <option value="demo-annex">Demo – Annex</option>
+        </select>
+      </label>
+      <label>Target Pour Cost %:
+        <input id="targetPct" type="number" value="11.5" step="0.1" min="1" max="100">
+      </label>
+      <label>Round price to:
+        <select id="rounding">
+          <option value="0.25">Nearest $0.25</option>
+          <option value="0.50">Nearest $0.50</option>
+          <option value="1">Nearest $1</option>
+          <option value="0">No Rounding</option>
+        </select>
+      </label>
       <button id="addRowBtn">Add Row</button>
       <button id="saveBtn">Save</button>
       <button id="resetBtn">Reset</button>
@@ -30,10 +43,9 @@
   </main>
 
   <footer>
-    <small>Data is saved to your browser (per location). Cloud sync comes in the next step.</small>
+    <small>Per-location data is saved to your browser. v3</small>
   </footer>
 
-  <script src="./app-v2.js?v=2"></script>
-  
+  <script src="./app-v3.js?v=3"></script>
 </body>
 </html>
