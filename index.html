@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>BevCost – Spreadsheet</title>
 
+  <!-- (Optional but safe) numbro for numericFormat; avoids "numbro is not defined" issues on some builds -->
+  <script src="https://cdn.jsdelivr.net/npm/numbro@2.3.6/dist/numbro.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/numbro@2.3.6/dist/languages.min.js"></script>
+
   <!-- Handsontable (must be before our script) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.css">
   <script src="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.js"></script>
@@ -63,12 +67,24 @@
   </main>
 
   <footer>
-    <small>Per-location data is saved to your browser. v3.3-inline</small>
+    <small>Per-location data is saved to your browser. v3.4-debug</small>
   </footer>
 
   <script>
-  // ---- Inline script: v3.3-inline (stable) ----
-  document.getElementById('ver')?.append('v3.3');
+  // ---- Inline script: v3.4-debug ----
+  document.getElementById('ver')?.append('v3.4');
+
+  // Catch any JS errors and show them on the page
+  const errEl = document.getElementById('err');
+  window.addEventListener('error', (e) => {
+    errEl.style.display = 'block';
+    errEl.textContent = '[BevCost Error] ' + e.message + (e.error && e.error.stack ? '\n' + e.error.stack : '');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    errEl.style.display = 'block';
+    const reason = e.reason && (e.reason.stack || e.reason.message) ? (e.reason.stack || e.reason.message) : String(e.reason);
+    errEl.textContent = '[BevCost Error] Promise rejection: ' + reason;
+  });
 
   const ML_PER_OZ = 29.5735;
   const STORAGE_KEY_BASE = 'bevcost_demo_';
@@ -76,7 +92,7 @@
 
   const els = {
     grid: document.getElementById('grid'),
-    err: document.getElementById('err'),
+    err: errEl,
     locationSelect: document.getElementById('locationSelect'),
     addRowBtn: document.getElementById('addRowBtn'),
     addColBtn: document.getElementById('addColBtn'),
@@ -88,11 +104,11 @@
 
   function showErr(msg, e) {
     els.err.style.display = 'block';
-    els.err.textContent = '[BevCost Error]\n' + msg + (e ? '\n' + (e.stack || e.message || e) : '');
+    els.err.textContent = '[BevCost Error]\\n' + msg + (e ? '\\n' + (e.stack || e.message || e) : '');
   }
 
   if (typeof window.Handsontable === 'undefined') {
-    showErr('Handsontable failed to load. Check the two CDN tags in <head>.');
+    showErr('Handsontable failed to load. Check the CDN tags in <head>.');
   }
 
   // Helpers
@@ -157,7 +173,6 @@
       instance.setDataAtRowProp(r, 'cost_per_pour', c.cost_per_pour, 'calc');
       instance.setDataAtRowProp(r, 'pour_cost_pct', c.pour_cost_pct, 'calc');
       instance.setDataAtRowProp(r, 'suggested_price', c.suggested_price, 'calc');
-      // Keep bottle normalized
       instance.setDataAtRowProp(r, 'bottle_ml', normalizeBottleMl(rows[r].bottle_ml), 'calc');
     }
   }
@@ -173,7 +188,7 @@
     {
       data: 'bottle_ml',
       type: 'dropdown',
-      source: [750, 1000],  // store numbers
+      source: [750, 1000],  // store numbers; render user-friendly labels
       strict: true, allowInvalid: false,
       renderer: (inst, td, row, col, prop, value) => {
         const label = Number(value) === 1000 ? '1 L' : '750 ml';
@@ -230,6 +245,10 @@
 
   function initGrid(loc){
     try{
+      if (typeof window.Handsontable === 'undefined') {
+        throw new Error('Handsontable not available on window.');
+      }
+
       currentMeta = loadMeta(loc);
       const {columns, colHeaders} = buildColumnsAndHeaders(currentMeta);
       const initialData = loadData(loc);
@@ -251,18 +270,20 @@
         manualColumnResize: true,
         manualRowResize: true,
         afterChange(changes, source){
-          if(!changes || source==='calc' || source==='loadData') return;
-          for (const [ri, prop, , nv] of changes){
-            if (['unit_cost','pour_oz','menu_price','bottle_ml'].includes(prop)){
-              if (prop==='bottle_ml') {
-                hot.setDataAtRowProp(ri, 'bottle_ml', normalizeBottleMl(nv), 'calc');
+          try {
+            if(!changes || source==='calc' || source==='loadData') return;
+            for (const [ri, prop, , nv] of changes){
+              if (['unit_cost','pour_oz','menu_price','bottle_ml'].includes(prop)){
+                if (prop==='bottle_ml') {
+                  hot.setDataAtRowProp(ri, 'bottle_ml', normalizeBottleMl(nv), 'calc');
+                }
+                const c = calcRow(hot.getSourceDataAtRow(ri));
+                hot.setDataAtRowProp(ri, 'cost_per_pour', c.cost_per_pour, 'calc');
+                hot.setDataAtRowProp(ri, 'pour_cost_pct', c.pour_cost_pct, 'calc');
+                hot.setDataAtRowProp(ri, 'suggested_price', c.suggested_price, 'calc');
               }
-              const c = calcRow(hot.getSourceDataAtRow(ri));
-              hot.setDataAtRowProp(ri, 'cost_per_pour', c.cost_per_pour, 'calc');
-              hot.setDataAtRowProp(ri, 'pour_cost_pct', c.pour_cost_pct, 'calc');
-              hot.setDataAtRowProp(ri, 'suggested_price', c.suggested_price, 'calc');
             }
-          }
+          } catch(e) { showErr('afterChange failed.', e); }
         },
         afterRender(){ applyRowHighlights(hot); }
       });
@@ -275,10 +296,7 @@
   }
 
   // ---- One-time UI event listeners (not inside initGrid) ----
-  function onAddRow(){
-    if (!hot) return;
-    hot.alter('insert_row', hot.countRows(), 1);
-  }
+  function onAddRow(){ hot?.alter('insert_row', hot.countRows(), 1); }
 
   function onAddCol(){
     if (!hot) return;
@@ -288,7 +306,6 @@
     for (const r of rows) if (!(newKey in r)) r[newKey] = '';
     const cfg = buildColumnsAndHeaders(currentMeta);
     hot.updateSettings({ columns: cfg.columns, colHeaders: cfg.colHeaders }, false);
-    // reload to ensure new props visible
     hot.loadData(rows);
     saveMeta(currentLocation, currentMeta);
     applyRowHighlights(hot);
